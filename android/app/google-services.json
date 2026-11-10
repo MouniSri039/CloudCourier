@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "78092775650",
+    "project_id": "autumnmarket",
+    "storage_bucket": "autumnmarket.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:78092775650:android:56ffe348dfa89c99eeeebb",
+        "android_client_info": {
+          "package_name": "com.example.autumn_market"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDj3M4w5QLh-9spKIwmF0sFHR7EvJ9GWnM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:78092775650:android:336c025ead16706feeeebb",
+        "android_client_info": {
+          "package_name": "com.example.cloud_courier"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDj3M4w5QLh-9spKIwmF0sFHR7EvJ9GWnM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
