@@ -1,22 +1,29 @@
 
 import 'dart:async';
 
+import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 
+import '../firebase_options.dart';
 import '../models/message_update.dart';
 
-/// Must be top-level. Background handlers cannot update Flutter widget state.
+/// Runs in a separate background isolate.
+/// It must never update foreground Flutter widget state.
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(
   RemoteMessage message,
 ) async {
-  debugPrint(
-    'Background message received: ${message.messageId}',
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
   );
 
-  // Do not call setState or access foreground widgets here.
-  // The operating system may display the notification.
+  debugPrint(
+    'onBackgroundMessage: ${message.messageId}',
+  );
+
+  // Background processing only. UI updates happen through foreground
+  // listeners or notification-open handlers.
 }
 
 class FCMService {
@@ -26,13 +33,14 @@ class FCMService {
 
   final FirebaseMessaging _messaging = FirebaseMessaging.instance;
 
-  final StreamController<MessageUpdate> _updatesController =
+  StreamController<MessageUpdate> _updatesController =
       StreamController<MessageUpdate>.broadcast();
 
   StreamSubscription<RemoteMessage>? _foregroundSubscription;
   StreamSubscription<RemoteMessage>? _openedSubscription;
 
   MessageUpdate _currentUpdate = MessageUpdate.initial();
+
   int _receiptCount = 0;
   bool _initialized = false;
   bool _disposed = false;
@@ -43,12 +51,13 @@ class FCMService {
 
   int get receiptCount => _receiptCount;
 
-  /// Current installation token. It is not a user identity or permission.
+  /// Returns the FCM installation token.
+  /// This token is not a user identity or authorization credential.
   Future<String?> getToken() async {
     return _messaging.getToken();
   }
 
-  /// Requests notification permission and returns the authorization status.
+  /// Requests notification permission.
   Future<NotificationSettings> requestPermission() {
     return _messaging.requestPermission(
       alert: true,
@@ -57,13 +66,22 @@ class FCMService {
     );
   }
 
-  /// Initializes listeners once and handles notification-triggered cold starts.
+  /// Initializes listeners once and processes notification-triggered
+  /// launches from the terminated state.
   Future<void> initialize() async {
-    if (_initialized || _disposed) return;
+    if (_initialized) return;
 
+    // Recreate the stream if the service was previously disposed.
+    if (_updatesController.isClosed) {
+      _updatesController =
+          StreamController<MessageUpdate>.broadcast();
+    }
+
+    _disposed = false;
     _initialized = true;
 
-    _foregroundSubscription = FirebaseMessaging.onMessage.listen(
+    _foregroundSubscription =
+        FirebaseMessaging.onMessage.listen(
       (RemoteMessage message) {
         _processMessage(message, 'onMessage');
       },
@@ -92,7 +110,7 @@ class FCMService {
       final RemoteMessage? initialMessage =
           await _messaging.getInitialMessage();
 
-      if (initialMessage != null) {
+      if (initialMessage != null && !_disposed) {
         _processMessage(
           initialMessage,
           'getInitialMessage',
@@ -106,7 +124,7 @@ class FCMService {
     }
   }
 
-  /// Validates the payload before changing visible content.
+  /// Validates custom data before changing visible application content.
   void _processMessage(
     RemoteMessage message,
     String handler,
@@ -115,10 +133,18 @@ class FCMService {
 
     _receiptCount++;
 
-    final String? action = message.data['action'] as String?;
-    final String? requestedAsset = message.data['asset'] as String?;
+    // Validate types rather than assuming all incoming values are strings.
+    final Object? rawAction = message.data['action'];
+    final Object? rawAsset = message.data['asset'];
 
-    final String messageId = message.messageId ?? 'Unavailable';
+    final String? action =
+        rawAction is String ? rawAction : null;
+
+    final String? requestedAsset =
+        rawAsset is String ? rawAsset : null;
+
+    final String messageId =
+        message.messageId ?? 'Unavailable';
 
     if (action != 'update_ui') {
       _publishDiagnostic(
@@ -131,7 +157,7 @@ class FCMService {
 
     if (requestedAsset == null || requestedAsset.isEmpty) {
       _publishDiagnostic(
-        'Rejected message: missing asset key.',
+        'Rejected message: missing or invalid asset key.',
         handler,
         messageId: messageId,
       );
@@ -150,10 +176,12 @@ class FCMService {
     }
 
     final String title =
-        message.notification?.title ?? 'Cloud update received';
+        message.notification?.title ??
+        'Cloud update received';
 
     final String body =
-        message.notification?.body ?? 'A new update is available.';
+        message.notification?.body ??
+        'A new update is available.';
 
     _currentUpdate = _currentUpdate.copyWith(
       title: title,
@@ -168,6 +196,8 @@ class FCMService {
     _emit();
   }
 
+  /// Updates diagnostics without changing the previous title, body,
+  /// or image selection.
   void _publishDiagnostic(
     String diagnostic,
     String handler, {
@@ -175,7 +205,6 @@ class FCMService {
   }) {
     if (_disposed) return;
 
-    // Preserve the previous title and image on invalid payloads.
     _currentUpdate = _currentUpdate.copyWith(
       handler: handler,
       messageId: messageId,
@@ -187,20 +216,25 @@ class FCMService {
   }
 
   void _emit() {
-    if (!_updatesController.isClosed) {
+    if (!_disposed && !_updatesController.isClosed) {
       _updatesController.add(_currentUpdate);
     }
   }
 
-  /// Cancels listeners and releases the stream controller.
+  /// Cancels service-owned listeners and closes the stream.
+  /// The service can be initialized again if required.
   Future<void> dispose() async {
     if (_disposed) return;
 
     _disposed = true;
+    _initialized = false;
+
     await _foregroundSubscription?.cancel();
     await _openedSubscription?.cancel();
-    await _updatesController.close();
 
-    _initialized = false;
+    _foregroundSubscription = null;
+    _openedSubscription = null;
+
+    await _updatesController.close();
   }
 }
